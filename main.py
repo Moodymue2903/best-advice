@@ -18,6 +18,13 @@ The program validates the gate before writing: UTF-8 text, 1-200
 characters, not only whitespace, exactly one sentence. It then reads the
 file back and compares it byte for byte, exiting non-zero on any
 failure.
+
+Revision note: the program now takes an optional command-line output
+path (default /output/entry.txt), so the entry can be tested locally
+without touching /output. The sentence check now goes through a small
+count_sentences() helper that splits on terminal punctuation (. ! ?)
+and counts non-empty segments, so the one-sentence rule no longer
+depends on counting periods by hand.
 """
 
 import sys
@@ -32,6 +39,24 @@ ENTRY = (
 OUTPUT_PATH = Path("/output/entry.txt")
 
 
+def count_sentences(text: str) -> int:
+    """Count sentences by splitting on terminal punctuation (. ! ?).
+
+    Splits on any terminal mark and counts only non-empty segments,
+    so trailing punctuation and extra spacing do not inflate the count.
+    """
+    segments = []
+    current = []
+    for char in text:
+        if char in ".!?":
+            segments.append("".join(current))
+            current = []
+        else:
+            current.append(char)
+    segments.append("".join(current))
+    return sum(1 for segment in segments if segment.strip())
+
+
 def fail(message: str) -> None:
     print(f"error: {message}", file=sys.stderr)
     sys.exit(1)
@@ -44,12 +69,11 @@ def validate(text: str) -> None:
         fail("entry is only whitespace")
     if len(text) < 1 or len(text) > 200:
         fail(f"entry is {len(text)} characters, must be 1-200")
-    # Exactly one sentence: a single terminal period, no other
-    # sentence-ending punctuation.
-    if text.count(".") != 1 or not text.endswith("."):
-        fail("entry must be exactly one sentence ending in a period")
-    if "?" in text or "!" in text:
-        fail("entry must be exactly one sentence (no ? or !)")
+    # Exactly one sentence, counted by the helper: one non-empty
+    # segment when split on terminal punctuation (. ! ?), and the
+    # entry ends with a terminal mark.
+    if count_sentences(text) != 1 or text[-1] not in ".!?":
+        fail("entry must be exactly one sentence")
     try:
         text.encode("utf-8")
     except UnicodeEncodeError:
@@ -57,22 +81,23 @@ def validate(text: str) -> None:
 
 
 def main() -> None:
+    output_path = Path(sys.argv[1]) if len(sys.argv) > 1 else OUTPUT_PATH
     validate(ENTRY)
     try:
-        OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
-        OUTPUT_PATH.write_text(ENTRY, encoding="utf-8")
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(ENTRY, encoding="utf-8")
     except OSError as exc:
-        fail(f"could not write {OUTPUT_PATH}: {exc}")
+        fail(f"could not write {output_path}: {exc}")
 
     try:
-        read_back = OUTPUT_PATH.read_text(encoding="utf-8")
+        read_back = output_path.read_text(encoding="utf-8")
     except OSError as exc:
-        fail(f"could not read back {OUTPUT_PATH}: {exc}")
+        fail(f"could not read back {output_path}: {exc}")
 
     if read_back.encode("utf-8") != ENTRY.encode("utf-8"):
         fail("read-back does not match the entry byte for byte")
 
-    print(f"wrote {len(ENTRY)} characters to {OUTPUT_PATH}")
+    print(f"wrote {len(ENTRY)} characters to {output_path}")
 
 
 if __name__ == "__main__":
